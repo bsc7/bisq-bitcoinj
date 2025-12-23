@@ -40,8 +40,14 @@ public class StoredBlock {
     // A BigInteger representing the total amount of work done so far on this chain. As of May 2011 it takes 8
     // bytes to represent this field, so 12 bytes should be plenty for now.
     public static final int CHAIN_WORK_BYTES = 12;
-    public static final byte[] EMPTY_BYTES = new byte[CHAIN_WORK_BYTES];
-    public static final int COMPACT_SERIALIZED_SIZE = Block.HEADER_SIZE + CHAIN_WORK_BYTES + 4;  // for height
+    public static final int CHAIN_WORK_BYTES_V1 = CHAIN_WORK_BYTES;
+    public static final int CHAIN_WORK_BYTES_V2 = 32;
+    private static final int HEIGHT_BYTES = 4;
+
+    private static final byte[] EMPTY_BYTES = new byte[CHAIN_WORK_BYTES_V2];
+    public static final int COMPACT_SERIALIZED_SIZE = Block.HEADER_SIZE + CHAIN_WORK_BYTES_V1 + HEIGHT_BYTES;
+    public static final int COMPACT_SERIALIZED_SIZE_V1 = COMPACT_SERIALIZED_SIZE;
+    public static final int COMPACT_SERIALIZED_SIZE_V2 = Block.HEADER_SIZE + CHAIN_WORK_BYTES_V2 + HEIGHT_BYTES;
 
     private Block header;
     private BigInteger chainWork;
@@ -117,29 +123,48 @@ public class StoredBlock {
 
     /** Serializes the stored block to a custom packed format. Used by {@link CheckpointManager}. */
     public void serializeCompact(ByteBuffer buffer) {
-        byte[] chainWorkBytes = Utils.bigIntegerToBytes(getChainWork(), CHAIN_WORK_BYTES);
-        if (chainWorkBytes.length < CHAIN_WORK_BYTES) {
-            // Pad to the right size.
-            buffer.put(EMPTY_BYTES, 0, CHAIN_WORK_BYTES - chainWorkBytes.length);
+        byte[] chainWorkBytes = Utils.bigIntegerToBytes(getChainWork(), CHAIN_WORK_BYTES_V1);
+        if (chainWorkBytes.length < CHAIN_WORK_BYTES_V1) {
+            buffer.put(EMPTY_BYTES, 0, CHAIN_WORK_BYTES_V1 - chainWorkBytes.length);
         }
         buffer.put(chainWorkBytes);
         buffer.putInt(getHeight());
-        // Using unsafeBitcoinSerialize here can give us direct access to the same bytes we read off the wire,
-        // avoiding serialization round-trips.
         byte[] bytes = getHeader().unsafeBitcoinSerialize();
-        buffer.put(bytes, 0, Block.HEADER_SIZE);  // Trim the trailing 00 byte (zero transactions).
+        buffer.put(bytes, 0, Block.HEADER_SIZE);
     }
 
     /** De-serializes the stored block from a custom packed format. Used by {@link CheckpointManager}. */
     public static StoredBlock deserializeCompact(NetworkParameters params, ByteBuffer buffer) throws ProtocolException {
-        byte[] chainWorkBytes = new byte[StoredBlock.CHAIN_WORK_BYTES];
+        byte[] chainWorkBytes = new byte[CHAIN_WORK_BYTES_V1];
         buffer.get(chainWorkBytes);
         BigInteger chainWork = new BigInteger(1, chainWorkBytes);
-        int height = buffer.getInt();  // +4 bytes
-        byte[] header = new byte[Block.HEADER_SIZE + 1];    // Extra byte for the 00 transactions length.
+        int height = buffer.getInt();
+        byte[] header = new byte[Block.HEADER_SIZE + 1];
         buffer.get(header, 0, Block.HEADER_SIZE);
         return new StoredBlock(params.getDefaultSerializer().makeBlock(header), chainWork, height);
     }
+
+    public void serializeCompactV2(ByteBuffer buffer) {
+        byte[] chainWorkBytes = Utils.bigIntegerToBytes(getChainWork(), CHAIN_WORK_BYTES_V2);
+        if (chainWorkBytes.length < CHAIN_WORK_BYTES_V2) {
+            buffer.put(EMPTY_BYTES, 0, CHAIN_WORK_BYTES_V2 - chainWorkBytes.length);
+        }
+        buffer.put(chainWorkBytes);
+        buffer.putInt(getHeight());
+        byte[] bytes = getHeader().unsafeBitcoinSerialize();
+        buffer.put(bytes, 0, Block.HEADER_SIZE);
+    }
+    
+    public static StoredBlock deserializeCompactV2(NetworkParameters params, ByteBuffer buffer) throws ProtocolException {
+        byte[] chainWorkBytes = new byte[CHAIN_WORK_BYTES_V2];
+        buffer.get(chainWorkBytes);
+        BigInteger chainWork = new BigInteger(1, chainWorkBytes);
+        int height = buffer.getInt();
+        byte[] header = new byte[Block.HEADER_SIZE + 1];
+        buffer.get(header, 0, Block.HEADER_SIZE);
+        return new StoredBlock(params.getDefaultSerializer().makeBlock(header), chainWork, height);
+    }
+
 
     @Override
     public String toString() {
